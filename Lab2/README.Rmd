@@ -142,6 +142,7 @@ moose_plot<-ggplot() +
 moose_plot2 <- moose_plot + scale_fill_manual(name="MOOSE_W",values=c("gray","gray", "red", "orange", "yellow", "green","darkblue"))
 moose_plot2
 ```
+Notice that the highest habitat quality for moose tends to be in valley bottoms
 
 Bighorn Sheep Winter Habitat Model
 ```{r}
@@ -153,6 +154,8 @@ sheep_plot<-ggplot() +
 sheep_plot2 <- sheep_plot + scale_fill_manual(name="SHEEP_W",values=c("gray","gray", "red", "orange", "yellow", "green","darkblue"))
 sheep_plot2
 ```
+High quality sheep habitat is slightly higher in elevation than moose habitat
+
 
 ## Part 1b - Spatial Raster Operations
 
@@ -175,22 +178,35 @@ The steps involved in creating these rasters below are key, and, good to review.
 mask.raster <- rast()
 
 #set extent (note that I customized this extent so it covered both elc_habitat and humanacess)
+
+## Always make your bounding box much larger than you think it needs to be bcause resampling can create NAs and bias around edges if the spatial extents of layers aren't the same!!!
+
 ext(mask.raster) <- c(xmin=443680.6, xmax=650430.4, ymin=5618416, ymax=5789236) 	
 
-#set the resolution to 30 m 
+
+#spatial resolution == GRAIN SIZE  != SCALE
+#resample() starts at one corner of extent and uses moving window to resample all layers to same grain size and spatial extent (registraiton)
+
+#set the resolution to 300 m 
 res(mask.raster)<-300
 
-#match projection to elc_habitat shapefile
+#match projection to elc_habitat shapefile- can also take EPSG
 crs(mask.raster)<- "+proj=utm +zone=11 +datum=NAD83 +units=m +no_defs +ellps=GRS80 +towgs84=0,0,0"
 
 #set all values of mask.raster to zero
 mask.raster[]<-0
+
+plot(mask.raster)
+#Value is NA outside of defined extent
+
+#we could extract HSI values of points form polygons to build RSF, but we need to rasterize to make pretty maps
 ```
 
 Next I use the terra::rasterize() to create rasters for DEER_W, MOOSE_W, ELK_W, SHEEP_W, GOAT_W, WOLF_W 
 
 ```{r}
 ##This does not take as long as the raster() package and fasterize is no longer needed
+#rasterize uses extent, resolution, etc. of input layer. Can be mask or any existing raster layer.
 deer_w<-terra::rasterize(elc_habitat, mask.raster, field="DEER_W")
 moose_w<-terra::rasterize(elc_habitat, mask.raster, field="MOOSE_W")
 elk_w<-terra::rasterize(elc_habitat, mask.raster, field="ELK_W")
@@ -199,7 +215,9 @@ goat_w<-terra::rasterize(elc_habitat, mask.raster, field="GOAT_W")
 wolf_w<-terra::rasterize(elc_habitat, mask.raster, field="WOLF_W")
 
 #Alternative using Stars Package 
+#Interacts with ggplot well and good for plotting random forest models
 #deer_w <- st_as_stars(elc_habitat, name = attr(elc_habitat, "DEER_W"))
+#rasterizes faster than terra
 deer_w_stars <- st_rasterize(elc_habitat["DEER_W"])
 moose_w_stars <- st_rasterize(elc_habitat["MOOSE_W"])
 elk_w_stars <- st_rasterize(elc_habitat["ELK_W"])
@@ -207,7 +225,7 @@ sheep_w_stars <- st_rasterize(elc_habitat["SHEEP_W"])
 goat_w_stars <- st_rasterize(elc_habitat["GOAT_W"])
 wolf_w_stars <- st_rasterize(elc_habitat["WOLF_W"])
 #plot result
-plot(wolf_w)
+plot(wolf_w) #This is from before wolves were in Banff
 plot(wolf_w_stars)
 ```
 
@@ -216,7 +234,8 @@ Next, we need to align the previously developed rasters, elevation and distance 
 Learn more about resampling by typing `?terra::resample` 
 Exporting raster layers you have worked on using the `writeRaster` command from the terra package like this:
 ```{r, eval = FALSE}
-#write raster layers to file
+#write raster layers to file (terra)
+#use this when you don't want to redo your raster operations every time.
 writeRaster(deer_w, here::here("Lab2","Output", "DEER_W.tiff"), overwrite = TRUE)
 ```
 
@@ -231,14 +250,20 @@ elevation2_stars <- read_stars(here::here("Data","Elevation2.tif"))
 #reading in elevation raster with terra
 disthumanaccess<-rast(here::here("Data","DistFromHumanAccess2.tif")) 
 disthighhumanaccess<-rast(here::here("Data","DistFromHighHumanAccess2.tif")) 
+
+ext(goat_w)
+ext(elevation2)# already the same
+ext(disthighhumanaccess) #different from the others
 ```
 
 ```{r, eval = FALSE}
 #resample elevation and humanaccess to match mask.raster 
 #note - not sure how to do this with stars package yet
 elevation2<-resample(elevation2, mask.raster, method="bilinear")
-disthumaccess2<-resample(disthumanaccess, mask.raster, method="bilinear")
-disthighhumaccess2<-resample(disthighhumanaccess, mask.raster, method="bilinear")
+disthumanaccess2<-resample(disthumanaccess, mask.raster, method="bilinear")
+disthighhumanaccess2<-resample(disthighhumanaccess, mask.raster, method="bilinear")
+
+#bilinear interpolation resamples linearly in 2 dimensions. Appropriate for continuous variables but not categorical variables
 ```
 
 How can we zoom into just one area of a raster object? There are many reasons we might want to, and many ways. One easy way is to use `mapview()`. Note - mapview is not evaluated here because the html image does not play well with .md files - try evaluating within your own project
@@ -254,7 +279,7 @@ deer_layer <- wolf_map + tm_shape(deer_w_stars)+tm_raster()
 deer_layer + tm_shape(sheep_w_stars)+tm_raster()
 ```
 
-## Part 1b - Distance to Raster (Human Access Layer)
+## Part 1c - Distance to Raster (Human Access Layer)
 
 First, there are many ways to evaluate human activity, polygonal (e.g., cities, parks), vector (roads, lines, points=houses), or more integrative spatial measures like density of human features or distance to human features.  Later in class we will compare and contrast why we would use distance to or density of a human feature as a resource covariate for wildlife. 
 
@@ -283,6 +308,12 @@ human.raster<-terra::rasterize(humanaccess, dist.raster, 1)
 #calculate distance to human access- NOTE : DO NOT RUN THIS IT TAKES FOREVER; I ENDED UP DOING THIS CALCULATION JUST FOR THE POINTS
 accessdist <-system.time(distance(human.raster))
 
+#default is minimum euclidean distance to nearest something
+
+#there are other ways of calcualting distance: path, elevational, etc.
+
+#use distance instead of density because you can always get density from distance_to
+
 ```
 
 
@@ -298,18 +329,21 @@ levels(as.factor(humanaccess$SUM_CLASS))
 #convert humanaccess$SUM_CLASS to a factor
 humanaccess$SUM_CLASS<-as.factor(humanaccess$SUM_CLASS)
 
+#renaming levels to clean up spelling
 levels(humanaccess$SUM_CLASS)[1]<-"NIL"
 levels(humanaccess$SUM_CLASS)[2]<-"HIGH"
 levels(humanaccess$SUM_CLASS)[3]<-"LOW"
 levels(humanaccess$SUM_CLASS)[5]<-"MODERATE"
 levels(humanaccess$SUM_CLASS)[6]<-"NIL"
 
-#create indicator variable for high or not high human access
+#create indicator variable for high or not high human access (Reclassification)
 highaccess<-humanaccess[humanaccess$SUM_CLASS=="HIGH" | humanaccess$SUM_CLASS=="VERY HIGH", ]
 
 #use package tmap() to create simple plots
 humanaccess_plot <- tm_shape(humanaccess)+tm_sf()
 humanaccess_plot + tm_shape(highaccess) + tm_sf(col = "red") 
+
+humanaccess_plot
 ```
 Now you would go through and rasterize this following the steps above to make this a raster file. Note I already did this with the distance to high human access layer.
 
@@ -328,17 +362,17 @@ And in this paper:
 First we will do a bit of data management to extract just the basics we need from the wolf telemetry object, wolfyht.shp.  We will extract the X Y locations, define a new dataframe, add the XY coordinates, a projection and create a new SpatialPointsDataFrame file - a common set of steps that here is slightly unnecessary because we already have a spatial points data frame.  But useful to review especially for students creating a new spatialPointsDataFrame from say, an excel spreadsheet or data from GPS radiocollars. 
 
 ```{r warning=FALSE}
-rd.data<-wolfyht[wolfyht$Pack=="Red Deer",]
-x<-rd.data$EASTING
+rd.data<-wolfyht[wolfyht$Pack=="Red Deer",] #subset one wolf pack
+x<-rd.data$EASTING #define coordinate fields
 y<-rd.data$NORTHING
-xy<-cbind(x,y)
+xy<-cbind(x,y)#bind coordinate fields together
 class(xy)
-rd <- data.frame(as.character(rd.data$NAME))
-coordinates(rd) <- xy
+rd <- data.frame(as.character(rd.data$NAME)) #pull out names of wolves
+coordinates(rd) <- xy # define xy as coordinates in sp dataframe 
 crs(rd) <-  "+proj=utm +zone=11 +datum=NAD83 +units=m +no_defs +ellps=GRS80 +towgs84=0,0,0"
 
 class(rd)
-# Fit 99% mpc
+# Fit 99% mcp
 #cp.rd <- mcp(rd, percent=99)
 #note error that one animal does not have at least 5 locations
 table(rd.data$NAME)
@@ -347,8 +381,8 @@ table(rd.data$NAME)
 #looks like 4 of the wolves do not have enough locations
 
 #remove these individuals with too few of locations
-names(rd)<-"NAME"
-rd<-rd[rd@data$NAME!="69" & rd@data$NAME!="81" & rd@data$NAME!="82" & rd@data$NAME!="84",]
+names(rd)<-"NAME" #create new vector of names
+rd<-rd[rd@data$NAME!="69" & rd@data$NAME!="81" & rd@data$NAME!="82" & rd@data$NAME!="84",] #subset out wolves that are not 69, 82 and 84
 #remove unused NAME levels
 rd@data$NAME<-factor(rd@data$NAME)
 ```
@@ -363,20 +397,27 @@ plot(cp.rd[cp.rd@data$id=="70",], col="green", add=TRUE)
 plot(cp.rd[cp.rd@data$id=="60",], col="red", add=TRUE)
 plot(rd, col="black", add=TRUE)
 
+#note differences between individual-level homeranges and pack-level homeranges
+
 #check area in square meters for each Red Deer wolf pack
 as.data.frame(cp.rd)
 
 #calculate area for different percents of MPC in square meters. 
-mcp.area(rd, percent=seq(50, 100, by=5))
+mcp.area(rd, percent=seq(50, 100, by=5)) #5% steps from 50 to 100%
+
+#how many locations do I need to estimate homerange size in an unbiased way?
+
+#MCP is problematic because it's not statistical, has no mathematical basis, and extent of polygon is basicaly defined by telemetry locations. Can still be useful for unmarked animals from cameras.
 ```
 
 We will now estimate Kernel Density Estimate home ranges using the command `kernelUD()`.
 ```{r, warning= FALSE}
 #calculate 99% KDE for Red Deer wolf pack
 red.deerUD <- kernelUD(rd, grid=30, extent=0.5, same4all=TRUE) # reference grid
-image(red.deerUD)
+image(red.deerUD) 
+#we can do math on these and relate them to probability of use
 
-#get polygons for home ranges
+#get polygons for home ranges (95 percentile KDE)
 homerangeRD <- getverticeshr(red.deerUD)
 as.data.frame(homerangeRD)
 class(homerangeRD)
@@ -386,7 +427,7 @@ plot(homerangeRD, col=2:4)
 red.deerud <- getvolumeUD(red.deerUD) 
 red.deerud
 
-## Set up graphical parameters for the output of getvolumeUD 
+## Set up graphical parameters for the output of getvolumeUD  (isopleths)
 par(mar=c(0,0,2,0)) #set margin
 image(red.deerud[[1]]) #for first wolf only
 title("Red Deer Wolf UD") 
@@ -434,7 +475,7 @@ plot(cp.bow[cp.bow@data$id=="44",], col="green",add=TRUE)
 plot(bv, col="black", add=TRUE)
 ```
 
-## Red Deer wolves
+## Bow valley wolves
 ```{r, warning= FALSE}
 #check area for each Red Deer wolf pack
 as.data.frame(cp.bow)
@@ -510,7 +551,7 @@ as.data.frame(cp.all)
 #calculate area for different percents of MPC
 mcp.area(all, percent=seq(50, 100, by=5))
 
-#calculate 99% KDE for both wolf packs
+#calculate 95% KDE for both wolf packs
 allUD <- kernelUD(all, grid=30, extent=0.5, same4all=TRUE) # reference grid
 image(allUD)
 ```
@@ -534,6 +575,10 @@ image(allud[[1]]) #for first wolf only
 title("Output of getvolumeUD") 
 xyzv <- as.image.SpatialGridDataFrame(allud[[1]]) 
 contour(xyzv, add=TRUE)
+
+#Utilization Distribution is a true probability density function
+
+#Problem: you have to calculate UDs for each pack or each individual and then rescale them and add them together, because they're all scaled by the sample size of the data. 
 ```
 
 Store the volume under the UD (as computed by getvolumeUD) of the first animal in fud 
@@ -580,6 +625,17 @@ plot(wolfyht$EASTING,wolfyht$NORTHING, col=c("red","blue")[wolfyht$PackID],ylab=
 legend(555000,5742500,unique(wolfyht$Pack),col=c("blue","red"),pch=1)
 plot(bv.avail, add=TRUE)
 plot(rd.avail, add=TRUE)
+
+#Used-available map
+
+#eventually we'll compare the used and available points using logistic regression assumming used and available distributions are both iid which of course isn't true because one is animal-generated and one is randomly generated
+
+#This is a within-home range scale analysis
+
+#assumes there are no boundaries to movement within homerange
+
+#every model of availability has problems
+
 ```
 
 **Discuss in class: assumptions of sampling availability this way? Spatial scale of this sampling design?**
@@ -598,7 +654,7 @@ Note today we are using tidyverse, which depends on tidyr, but I've loaded it se
 ```{r}
 #with terra
 #first re-sampling so that extents match
-disthumanaccess2 <- resample(disthumanaccess2, deer_w)
+disthumanaccess2 <- resample(disthumanaccess, deer_w)
 disthighhumanaccess <- resample(disthighhumanaccess, deer_w)
 
 #stacking rasters
@@ -751,6 +807,13 @@ wolf_df %>% group_by(pack) %>% summarise(mean(GOAT_W))
 wolf_df %>% group_by(pack) %>% summarise(mean(WOLF_W))
 ```
 **Discussion** how do the Bow Valley and Red Deer wolf packs differ across the different environmental covariates?
+
+It's very useful to look at patterns of use in isolation of patterns of availability before looking at avaialability distribution!
+
+This is a 3rd order resource selection analysis (within-homerange)
+
+4th order is diet scale
+
 
 # Practice Excercises (e.g., Homework)
 
